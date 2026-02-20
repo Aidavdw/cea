@@ -3,17 +3,20 @@ module rocket_test
     use cea_rocket
     use cea_equilibrium
     use cea_thermo
+    use cea_transport
     use cea_mixture
     use cea_units
     use cea_param, only: R=>gas_constant, snl=>species_name_len
 
     type(ThermoDB) :: all_thermo
+    type(TransportDB) :: all_transport
 
 contains
 
     @before
     subroutine setup_mixture()
         all_thermo = read_thermo('data/thermo.lib')
+        all_transport = read_transport('data/trans.lib')
     end subroutine
 
     @test
@@ -445,6 +448,64 @@ contains
         @assertRelativelyEqual(3185.6731730807096d0, soln%eq_soln(2)%T, 1.d-4)
         @assertRelativelyEqual(-6.1821344716750914d0, soln%eq_soln(2)%ln_nj(1), 1.d-4)
         @assertRelativelyEqual(-3.7758918668469459d0, soln%eq_soln(2)%ln_nj(2), tol)
+
+    end subroutine
+
+    @test
+    subroutine test_rocket_transport
+        type(Mixture) :: products
+        type(Mixture) :: reactants
+        type(RocketSolver) :: solver
+        type(RocketSolution) :: soln
+        character(:), allocatable :: product_names(:)
+        real(dp) :: hc, pc, weights(2)
+        real(dp), parameter :: tol = 1.0d-3
+
+        reactants = Mixture(all_thermo, ['CH4', 'O2 '])
+        product_names = reactants%get_products(all_thermo)
+        products = Mixture(all_thermo, product_names)
+
+        weights = reactants%weights_from_of([0.0d0, 1.0d0], [1.0d0, 0.0d0], 2.6d0)
+        hc = reactants%calc_enthalpy(weights, [298.15d0, 298.15d0])/R
+        pc = psi_to_bar(1000.0d0)
+
+        solver = RocketSolver(products, reactants, all_transport=all_transport)
+        soln = solver%solve(weights, pc, pi_p=[10.0d0], supar=[20.0d0], hc=hc)
+
+        ! Test convergence
+        @assertEqual(.true., soln%converged)
+
+        ! Chamber transport properties
+        @assertRelativelyEqual(3371.84d0,  soln%eq_soln(1)%T,               tol)
+        @assertRelativelyEqual(1.0391d0,   soln%eq_soln(1)%viscosity,       tol)
+        @assertRelativelyEqual(10.4826d0,  soln%eq_soln(1)%conductivity_eq, tol)
+        @assertRelativelyEqual(0.4635d0,   soln%eq_soln(1)%pr_eq,           tol)
+        @assertRelativelyEqual(4.1984d0,   soln%eq_soln(1)%conductivity_fr, tol)
+        @assertRelativelyEqual(0.6279d0,   soln%eq_soln(1)%pr_fr,           tol)
+
+        ! Throat transport properties
+        @assertRelativelyEqual(3148.65d0,  soln%eq_soln(2)%T,               tol)
+        @assertRelativelyEqual(0.98981d0,  soln%eq_soln(2)%viscosity,       tol)
+        @assertRelativelyEqual(8.7103d0,   soln%eq_soln(2)%conductivity_eq, tol)
+        @assertRelativelyEqual(0.4693d0,   soln%eq_soln(2)%pr_eq,           tol)
+        @assertRelativelyEqual(3.9367d0,   soln%eq_soln(2)%conductivity_fr, tol)
+        @assertRelativelyEqual(0.6324d0,   soln%eq_soln(2)%pr_fr,           tol)
+
+        ! Exit transport properties (pi_p=10, Ae/At=2.3019)
+        @assertRelativelyEqual(2457.73d0,  soln%eq_soln(3)%T,               tol)
+        @assertRelativelyEqual(0.82957d0,  soln%eq_soln(3)%viscosity,       tol)
+        @assertRelativelyEqual(4.2652d0,   soln%eq_soln(3)%conductivity_eq, tol)
+        @assertRelativelyEqual(0.5445d0,   soln%eq_soln(3)%pr_eq,           tol)
+        @assertRelativelyEqual(3.1312d0,   soln%eq_soln(3)%conductivity_fr, tol)
+        @assertRelativelyEqual(0.6423d0,   soln%eq_soln(3)%pr_fr,           tol)
+
+        ! Exit transport properties (supar=20, Ae/At=20)
+        @assertRelativelyEqual(1442.09d0,  soln%eq_soln(4)%T,               tol)
+        @assertRelativelyEqual(0.56764d0,  soln%eq_soln(4)%viscosity,       tol)
+        @assertRelativelyEqual(2.0853d0,   soln%eq_soln(4)%conductivity_eq, tol)
+        @assertRelativelyEqual(0.6351d0,   soln%eq_soln(4)%pr_eq,           tol)
+        @assertRelativelyEqual(1.9610d0,   soln%eq_soln(4)%conductivity_fr, tol)
+        @assertRelativelyEqual(0.6315d0,   soln%eq_soln(4)%pr_fr,           tol)
 
     end subroutine
 
